@@ -1,12 +1,11 @@
-# draft
-# score: 925
-# epic mode: 924
+# rubywarrior: universal intermediate bot
+# 923 points in normal mode
+# 941 points in epic mode
 class Player
   DIRECTIONS = [:forward, :right, :backward, :left]
-  RANGE_ENEMY = ['a', 'w']
 
   def initialize
-    @max_health = @health = 20
+    @health = 20
     @last_move = nil
     @last_bomb = false
     @units = []
@@ -14,7 +13,6 @@ class Player
     @under_attack = false
     @view = {}
     @enemy = nil
-    @left_wall = false
     @detonate = false
   end
 
@@ -24,33 +22,8 @@ class Player
     s2
   end
 
-  def scan_view
-    @detonate = @enemy = @captive = @stairs = nil
-    DIRECTIONS.each do |dir|
-      distance = 0
-      @view[dir].each do |space|
-        distance += 1
-        next if distance > 1 and not @warrior.respond_to?(:shoot)
-        enemies = 0
-        s = {:distance => distance, :direction => dir, :space => space}
-        if space.captive?
-          @captive = closer @captive, s
-        elsif space.enemy?
-          unless @enemy
-            @enemy = s
-          else
-            if RANGE_ENEMY.include?(space.character)
-              @enemy = RANGE_ENEMY.include?(@enemy[:space].character) ? closer(@enemy, s) : s
-            else
-              @enemy =  closer @enemy, s
-            end
-          end
-        elsif space.stairs?
-          @stairs = s
-        end
-        break if space.captive? or space.enemy?
-      end
-    end
+  def check_detonate
+    @detonate = false
     DIRECTIONS.each do |dir|
       enemies = 0
       next if @view[dir][0].empty?
@@ -62,14 +35,35 @@ class Player
         @units.each do |u|
           next if u.character != 'C'
           if @warrior.distance_of(u) <= 2
-            p @warrior.distance_of(u)
             @enemy = {:distance => 1, :space => @warrior.feel(@detonate), :direction => @detonate}
             @detonate = false
             break
           end
-        end
+        end if @warrior.respond_to?(:distance_of)
       end
     end
+
+    if (not @detonate) and @last_bomb and @enemies.size > 0
+      enemy = false
+      @view[@last_bomb][0,2].each {|s| enemy = true if s.enemy?}
+      @detonate = @last_bomb if enemy
+    end
+  end
+
+  def scan_view
+    @detonate = @enemy = @captive = @stairs = nil
+    DIRECTIONS.each do |dir|
+      space = @view[dir].first
+      s = {:distance => 1, :direction => dir, :space => space}
+      if space.character == 'C'
+        @captive = closer @captive, s
+      elsif space.enemy? or space.captive?
+        @enemy = (not @enemy) ? s : space.captive? ? @enemy : closer(@enemy, s)
+      elsif space.stairs?
+          @stairs = s
+      end
+    end
+    check_detonate
   end
 
   def look_around
@@ -90,30 +84,14 @@ class Player
       }
     end
 
+    @enemies = @units.select{ |u| u.character != 'C' }
+
     scan_view
-  end
-
-  def wall?(dir=:forward)
-    @view[dir].each do |space|
-      return true if space.wall?
-      return false unless space.empty?
-      return false if space.stairs?
-    end
-    false
-  end
-
-  def danger_enemy?
-    return false unless @enemy
-
-    c = @enemy[:space].character
-    return true if c == 'w'
-    return true if c == 'S' and @health < 13
-    return true if c == 'a' and (@enemy[:distance] > 2 or @health < 10)
-    false
   end
 
   def low_health?
     return false unless @warrior.respond_to?(:health)
+    return false if @warrior.respond_to?(:listen) and @enemies.size == 0
     if @enemy
       c = @enemy[:space].character
       lh = @health < 16
@@ -123,12 +101,13 @@ class Player
   end
 
   def under_attack?
-    return true if @under_attack
-    if @enemy
-      c = @enemy[:space].character
-      return true if ['w','a'].include?(c)
-    end
-    false
+    return false
+    @under_attack
+  end
+
+  def ticking?
+    return false if @units.empty?
+    @units[0].captive? and @units[0].ticking?
   end
 
   def surrounded?
@@ -139,12 +118,7 @@ class Player
       enemies += 1 if space and space.enemy?
       captives += 1 if space and space.captive?
     end
-    (enemies > 1) or (enemies > 0 and captives > 0 and @warrior.health < 5)
-  end
-
-  def ticking?
-    return false if @units.empty?
-    @units[0].captive? and @units[0].ticking?
+    (enemies > 1) or (ticking? and enemies > 0 and captives > 0 and (@captive and @captive[:space].ticking?))
   end
 
   def oposite?(a,b)
@@ -180,15 +154,11 @@ class Player
     @warrior = warrior
 
     if @warrior.respond_to?(:health)
-      @under_attack = @warrior.health < @health
+      @under_attack = (@warrior.health < @health) and (not @last_bomb)
       @health = @warrior.health
     end
 
     look_around
-
-    if low_health? and (not @stairs) and (not under_attack?) and (@units.size > 0) and (not ticking?)
-      return @warrior.rest! 
-    end
 
     if surrounded?
       dir = @enemy[:direction]
@@ -196,28 +166,36 @@ class Player
         s = @view[d][0]
         next if s.empty? or s.wall? or s.captive?
         next if d == @detonate
-        next if ticking? and (@warrior.direction_of(@units.first) == d)
-        dir = @warrior.direction_of(s)
+        next if ticking? and @warrior.respond_to?(:direction_of) and (@warrior.direction_of(@units.first) == d)
+        dir = d
       end
       return @warrior.bind!(dir)
     end
 
-    if @enemy and ((not ticking?) or no_way?) and not @detonate
-      if ticking?
-        return @warrior.attack!(@warrior.direction_of @units.first)
+    if low_health? and (not @stairs) and (not under_attack?) and (not ticking?)
+      if (@warrior.respond_to?(:listen) and @enemies.size > 0) and (not @enemy or @enemy[:space].captive?) or
+         (not @enemy) or
+         (@enemy and @enemy[:space].captive?)
+        return @warrior.rest! 
       end
-      return @warrior.shoot!(@enemy[:direction]) if (@enemy[:distance] > 1) and danger_enemy?
-      return @warrior.attack!(@enemy[:direction]) if (@enemy[:distance] <= 1)
-      return move!(@enemy[:direction])
     end
 
     if @detonate
       return @warrior.rest! if @warrior.health < 5
-      @last_bomb = true
+      @last_bomb = @detonate
       return @warrior.detonate!(@detonate)
     end
 
-    if low_health? and @last_bomb == true and @units.select{|u| u.enemy?}.size>0
+    if @enemy and ((not ticking?) or no_way?)
+      if ticking?
+        # no way, so bot has to fight
+        return @warrior.attack!(@warrior.direction_of @units.first)
+      end
+      return @warrior.attack!(@enemy[:direction]) if (@enemy[:distance] <= 1)
+      return move!(@enemy[:direction])
+    end
+
+    if low_health? and @last_bomb and @enemies.size>0
       return @warrior.rest!
     else
       @last_bomb = false
@@ -238,11 +216,7 @@ class Player
           next if not space.empty?
           pos << d
         end
-        if oposite?(dir, pos.first) and pos.size > 1
-          dir = pos.last
-        else
-          dir = pos.first
-        end
+        dir = (oposite?(dir, pos.first) and pos.size > 1) ? pos.last : pos.first
       end
       return move! dir
     end
