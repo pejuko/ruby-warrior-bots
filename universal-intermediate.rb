@@ -77,8 +77,14 @@ class Player
 
     if @warrior.respond_to? :listen
       @units = @warrior.listen.sort { |a,b|
-        (a.captive? and a.ticking?) ? -1 : 
-          (b.captive? and b.ticking?) ? 1 : 0
+        res = (a.captive? and a.ticking?) ? -1 : 
+                (b.captive? and b.ticking?) ? 1 : 0
+        if @warrior.respond_to?(:distance_of) and res == 0
+          da = @warrior.distance_of(a)
+          db = @warrior.distance_of(b)
+          res = (da > db) ? -1 : (db > da) ? 1 : 0
+        end
+        res
       }
     end
 
