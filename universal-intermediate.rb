@@ -1,6 +1,5 @@
-# rubywarrior: universal intermediate bot
-# 923 points in normal mode
-# 941 points in epic mode
+# score: 930
+# epic mode: 941
 class Player
   DIRECTIONS = [:forward, :right, :backward, :left]
 
@@ -10,7 +9,6 @@ class Player
     @last_bomb = false
     @units = []
     @warrior = nil
-    @under_attack = false
     @view = {}
     @enemy = nil
     @detonate = false
@@ -100,11 +98,6 @@ class Player
     @warrior.health < 16
   end
 
-  def under_attack?
-    return false
-    @under_attack
-  end
-
   def ticking?
     return false if @units.empty?
     @units[0].captive? and @units[0].ticking?
@@ -154,7 +147,6 @@ class Player
     @warrior = warrior
 
     if @warrior.respond_to?(:health)
-      @under_attack = (@warrior.health < @health) and (not @last_bomb)
       @health = @warrior.health
     end
 
@@ -172,7 +164,7 @@ class Player
       return @warrior.bind!(dir)
     end
 
-    if low_health? and (not @stairs) and (not under_attack?) and (not ticking?)
+    if low_health? and (not @stairs) and (not ticking?)
       if (@warrior.respond_to?(:listen) and @enemies.size > 0) and (not @enemy or @enemy[:space].captive?) or
          (not @enemy) or
          (@enemy and @enemy[:space].captive?)
